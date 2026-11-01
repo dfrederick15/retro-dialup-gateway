@@ -16,10 +16,15 @@ MARKER = b"__SERSHELL_DONE rc="
 class Shell:
     def __init__(self, host, port):
         self.s = socket.create_connection((host, port), timeout=8)
-        self.s.settimeout(0.5)
-        try:                                    # swallow the banner
-            while self.s.recv(4096): pass
-        except socket.timeout: pass
+        # swallow the banner ("sershell-tcp ready ...") and the first prompt;
+        # over a 115200 link to a 486 it can take a few seconds to arrive
+        self.buf = b""; t = time.time(); self.s.settimeout(0.5)
+        while time.time() - t < 8 and not (b"ready" in self.buf and self.buf.rstrip().endswith(b">")):
+            try:
+                d = self.s.recv(4096)
+                if not d: raise ConnectionError("connection closed by PC")
+                self.buf += d
+            except socket.timeout: pass
         self.s.settimeout(2.0); self.buf = b""
 
     def _recv(self):
@@ -47,7 +52,14 @@ class Shell:
     def put(self, local, win):
         data = open(local, "rb").read(); self.buf = b""
         self.s.sendall((":put %s %d\n" % (win, len(data))).encode("latin-1"))
-        self.s.sendall(data)
+        # sendall's timeout covers the whole call, and the serial link moves
+        # only ~11 KB/s, so send in chunks with a generous per-chunk timeout
+        self.s.settimeout(30)
+        try:
+            for i in range(0, len(data), 4096):
+                self.s.sendall(data[i:i + 4096])
+        finally:
+            self.s.settimeout(2.0)
         return self._done()[1], len(data)
 
     def get(self, win, local):

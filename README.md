@@ -61,6 +61,7 @@ ME, NT 4, 2000 and XP:
 | `SERSHTCP.EXE` | Remote control over the dial-up link (run `SERSHTCP /install` once to start it at every logon) |
 | `SERSHELL.EXE` | Remote control over the bare serial cable when not dialed in (`SERSHELL COM1 115200`) |
 | `REBOOT.EXE`   | Forces an immediate restart |
+| `KILL.EXE`     | Lists or ends programs, since 9x has no `taskkill` (`KILL /L`, `KILL NAME.EXE`, `KILL 0xPID`) |
 
 Step-by-step instructions for each Windows version (installing the modem
 driver, creating the dial-up connection and setting the browser proxy) are in
@@ -70,6 +71,24 @@ driver, creating the dial-up connection and setting the browser proxy) are in
 2. Create a dial-up connection with any phone number and any user name.
 3. Dial. The PC gets `192.168.95.2`; test with `ping 192.168.95.1`.
 4. For the web, set the browser's HTTP proxy to `192.168.95.1:8080` and use `http://` URLs.
+
+## Updating
+
+Linux: `git pull && sudo ./install.sh --no-deps`. The proxy restarts; the
+gateway restarts only if no PC is dialed in.
+
+Vintage PC, while dialed in (Windows can't replace a running EXE, so the new
+copy runs on a side port first):
+
+```sh
+retrogw-ctl put /opt/retrogw/windows/SERSHTCP.EXE C:\RETROGW\NEW.EXE
+retrogw-ctl put /opt/retrogw/windows/KILL.EXE C:\RETROGW\KILL.EXE
+retrogw-ctl "start /m C:\RETROGW\NEW.EXE /port 2324"
+retrogw-ctl -p 2324 "C:\RETROGW\KILL.EXE C:\RETROGW\SERSHTCP.EXE"
+retrogw-ctl -p 2324 "copy C:\RETROGW\NEW.EXE C:\RETROGW\SERSHTCP.EXE"
+retrogw-ctl -p 2324 "start /m C:\RETROGW\SERSHTCP.EXE /hide"
+retrogw-ctl "C:\RETROGW\KILL.EXE C:\RETROGW\NEW.EXE"
+```
 
 ## Control panel
 

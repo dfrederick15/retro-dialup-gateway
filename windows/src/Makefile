@@ -12,7 +12,7 @@ LDFLAGS = -nostdlib -nostartfiles -e _entry \
           -Wl,--major-os-version,4,--minor-os-version,0
 OUT     = ../bin
 
-all: $(OUT)/SERSHELL.EXE $(OUT)/SERSHTCP.EXE $(OUT)/REBOOT.EXE
+all: $(OUT)/SERSHELL.EXE $(OUT)/SERSHTCP.EXE $(OUT)/REBOOT.EXE $(OUT)/KILL.EXE
 
 $(OUT)/SERSHELL.EXE: sershell.c common.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--subsystem,console -o $@ $< -lkernel32
@@ -20,6 +20,9 @@ $(OUT)/SERSHTCP.EXE: sershtcp.c common.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--subsystem,console -o $@ $< -lkernel32 -lwsock32 -ladvapi32
 $(OUT)/REBOOT.EXE: reboot.c common.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--subsystem,windows -o $@ $< -lkernel32 -luser32
+
+$(OUT)/KILL.EXE: kill.c common.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--subsystem,console -o $@ $< -lkernel32
 
 # verify: PE subsystem 4.0, only 9x-safe DLLs, no i686-only instructions
 check: all

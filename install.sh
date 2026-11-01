@@ -112,6 +112,6 @@ cat <<MSG
   Control panel:   retrogw            (or "Retro Dial-Up Gateway" in the app menu)
   Settings:        Settings menu in the panel, or edit $CONF
   CLI control:     retrogw-ctl "dir c:\\"
-  Windows files:   $PREFIX/windows/  (SERSHTCP.EXE, SERSHELL.EXE, REBOOT.EXE)
+  Windows files:   $PREFIX/windows/  (SERSHTCP.EXE, SERSHELL.EXE, REBOOT.EXE, KILL.EXE)
   Log:             journalctl -u retrogw-gateway -f
 MSG

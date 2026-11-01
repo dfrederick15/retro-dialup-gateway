@@ -8,8 +8,10 @@ For Windows 95, 98, ME, NT 4.0, 2000 and XP (one set of files runs on all).
                 is NOT dialed in.  Usage: SERSHELL [COMn] [baud]
                 (default COM1 115200).
   REBOOT.EXE    Forces an immediate restart (handy from the remote shell).
+  KILL.EXE      Lists or ends programs (9x has no taskkill):
+                KILL /L, KILL NAME.EXE, KILL C:\PATH\NAME.EXE, KILL 0xPID
 
-All three are tiny (under 10 KB), need no installer, no DLLs and no runtime.
+All four are tiny (under 10 KB), need no installer, no DLLs and no runtime.
 Copy them to C:\ with a floppy, CD, or SERSHELL's serial file transfer.
 
 
