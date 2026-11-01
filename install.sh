@@ -27,21 +27,23 @@ if [ $DEPS = 1 ]; then
   say "Installing dependencies"
   if command -v apt-get >/dev/null; then
     apt-get update -qq
-    apt-get install -y python3 python3-serial python3-pyqt5 ppp lrzsz iproute2 nftables
+    apt-get install -y python3 python3-serial python3-pyqt5 python3-cryptography python3-pil ppp lrzsz iproute2 nftables
   elif command -v dnf >/dev/null; then
-    dnf install -y python3 python3-pyserial python3-qt5 ppp lrzsz iproute nftables
+    dnf install -y python3 python3-pyserial python3-qt5 python3-cryptography python3-pillow ppp lrzsz iproute nftables
   elif command -v pacman >/dev/null; then
-    pacman -S --needed --noconfirm python python-pyserial python-pyqt5 ppp lrzsz iproute2 nftables
+    pacman -S --needed --noconfirm python python-pyserial python-pyqt5 python-cryptography python-pillow ppp lrzsz iproute2 nftables
   elif command -v zypper >/dev/null; then
-    zypper --non-interactive install python3 python3-pyserial python3-qt5 ppp lrzsz iproute2 nftables
+    zypper --non-interactive install python3 python3-pyserial python3-qt5 python3-cryptography python3-Pillow ppp lrzsz iproute2 nftables
   else
-    echo "Unknown package manager. Install manually: python3, pyserial, PyQt5, pppd, lrzsz, iproute2, nftables"
+    echo "Unknown package manager. Install manually: python3, pyserial, PyQt5, cryptography, Pillow, pppd, lrzsz, iproute2, nftables"
   fi
 fi
 for c in python3 pppd ip; do
   command -v $c >/dev/null || [ -x /usr/sbin/$c ] || { echo "missing: $c"; exit 1; }
 done
 python3 -c 'import serial' 2>/dev/null || { echo "missing: python3 pyserial"; exit 1; }
+python3 -c 'import cryptography' 2>/dev/null || echo "    NOTE: python3 cryptography missing: the proxy won't accept https:// from the old PC"
+python3 -c 'import PIL' 2>/dev/null || echo "    NOTE: python3 Pillow missing: the proxy won't shrink images"
 
 # ---- 2. files ----
 say "Installing to $PREFIX"
@@ -50,7 +52,9 @@ install -m 644 "$HERE"/linux/retrogw/*.py "$PREFIX/"
 install -m 755 "$HERE"/linux/retrogw/*.sh "$PREFIX/"
 chmod 755 "$PREFIX"/{vmodem,retroproxy,retrogw_gui,tcpctl,serctl}.py
 install -m 644 "$HERE"/windows/bin/*.EXE "$HERE"/windows/README.txt "$PREFIX/windows/"
-rm -rf "$PREFIX/__pycache__"
+rm -rf "$PREFIX/vendor"; cp -r "$HERE/linux/retrogw/vendor" "$PREFIX/vendor"   # tlslite-ng, ecdsa, six
+chmod -R u=rwX,go=rX "$PREFIX/vendor"
+find "$PREFIX" -name __pycache__ -prune -exec rm -rf {} +
 
 for pair in "retrogw:retrogw_gui.py" "retrogw-ctl:tcpctl.py" "retrogw-serial:serctl.py"; do
   ln -sf "$PREFIX/${pair#*:}" "/usr/local/bin/${pair%%:*}"

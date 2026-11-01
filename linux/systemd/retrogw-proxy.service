@@ -9,6 +9,9 @@ Type=simple
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/bin/python3 /opt/retrogw/retroproxy.py
 DynamicUser=yes
+# keeps the HTTPS certificate authority (ca.crt/ca.key) across restarts
+StateDirectory=retrogw-proxy
+StateDirectoryMode=0700
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes

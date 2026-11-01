@@ -12,7 +12,7 @@ lets you run DOS commands and copy files from Linux while the PC is online.
 ```
  Windows 9x/2000/XP ──serial cable── Linux ──NAT── internet
    192.168.95.2        (PPP)        192.168.95.1
-     ├─ browser ──> retro web proxy :8080 (fetches HTTPS, slims pages)
+     ├─ browser ──> retro web proxy :8080 (HTTPS both ways, gzip, smaller images)
      └─ SERSHTCP.EXE :2323 <── control panel / retrogw-ctl
 ```
 
@@ -70,7 +70,8 @@ driver, creating the dial-up connection and setting the browser proxy) are in
 1. Add a **Standard 33600 bps Modem** on the COM port and set its maximum speed to 115200.
 2. Create a dial-up connection with any phone number and any user name.
 3. Dial. The PC gets `192.168.95.2`; test with `ping 192.168.95.1`.
-4. For the web, set the browser's HTTP proxy to `192.168.95.1:8080` and use `http://` URLs.
+4. For the web, set the browser's HTTP proxy **and** Security (SSL) proxy to `192.168.95.1:8080`.
+5. For `https://` sites, open `http://192.168.95.1:8080/` on the PC and install the certificate (see below).
 
 ## Updating
 
@@ -90,12 +91,43 @@ retrogw-ctl -p 2324 "start /m C:\RETROGW\SERSHTCP.EXE /hide"
 retrogw-ctl "C:\RETROGW\KILL.EXE C:\RETROGW\NEW.EXE"
 ```
 
+## Web proxy
+
+The proxy does the modern-web work so the old PC doesn't have to:
+
+- **HTTPS to the site.** Every page is fetched over HTTPS when the site has
+  it (certificate checked), falling back to plain HTTP. Links are rewritten
+  to `http://` so browsing stays in the proxy.
+- **HTTPS from the old browser.** Windows 9x browsers only know SSL 3.0/TLS 1.0
+  with RC4 or 3DES, which modern OpenSSL has removed. The proxy terminates those
+  connections itself using the bundled pure-Python
+  [tlslite-ng](https://github.com/tlsfuzzer/tlslite-ng), with SSL 3.0 to TLS 1.2,
+  RC4, 3DES and AES, and old SSLv2-format hellos. It presents a certificate for each site from a local
+  certificate authority made just for your gateway (SHA-1 signed, valid
+  2000–2049, so old PCs and wrong clocks accept it). By default it then
+  redirects the page to `http://`, so **plain HTTP crosses the serial line**
+  instead of encryption the 486 has to grind through. Form posts stay inside
+  TLS so nothing is lost.
+- **Compression.** Pages are gzipped for browsers that send
+  `Accept-Encoding: gzip` (Wikipedia: 551 KB → 83 KB). Images are re-encoded
+  as baseline JPEGs at quality 40 and at most 640 px wide, which also makes
+  WebP viewable on old browsers (a 225 KB PNG became 11 KB). Windows 95 refuses
+  PPP-level compression (it only offers Microsoft's MPPC/STAC, which Linux
+  `pppd` lacks), so this is where the savings come from. VJ TCP/IP header compression is on.
+
+**Installing the certificate on the PC:** browse to `http://192.168.95.1:8080/`
+(the proxy's own page) and click *download the certificate*. Netscape 4 asks
+to accept a new certificate authority. Tick "accept for web sites". Internet
+Explorer opens the certificate. Choose *Install Certificate*. Check the
+fingerprint on the page against the control panel (hover over **HTTPS**). The
+CA lives in `/var/lib/private/retrogw-proxy` and is unique to your gateway.
+
 ## Control panel
 
 - **Gateway / Proxy** start and stop buttons, with a live status line.
 - **Network stats**: modem state, last dial, connection time, addresses, latency, RX/TX bytes, packets and speed, line utilization, peaks and errors.
 - **Dialing log**: the modem's AT command exchange and the PPP setup, as they happen.
-- **Web proxy**: status, the browser setting to use, requests and failures, open connections, average fetch time, data fetched vs. sent to the PC (and how much page slimming saved), and the last URL. The **Proxy log** tab lists every request.
+- **Web proxy**: status, the browser setting to use, HTTPS handshakes (with the SSL/TLS version and cipher), requests and failures, open connections, average fetch time, data fetched vs. sent to the PC and how much was saved, what's being optimized (gzip, images, https → http), and the last URL. The **Proxy log** tab lists every request.
 - **Console**: run commands on the PC, and push or get files.
 - **Settings menu**: serial port, speed, IP addresses, DNS, which interface to share internet from, the PPP interface, proxy options and the control port.
 
@@ -125,6 +157,11 @@ journalctl -u retrogw-proxy -f        # web proxy requests
 | `PPP_UNIT` | `95` | PPP interface becomes `ppp95` |
 | `PROXY_PORT` | `8080` | Retro web proxy port |
 | `PROXY_STRIP_SCRIPTS` | `1` | Remove scripts/styles from pages |
+| `PROXY_TLS` | `1` | Accept `https://` from the old browser (needs the CA installed) |
+| `PROXY_TLS_TO_HTTP` | `1` | After the handshake, redirect page loads to `http://` (plain HTTP on the wire) |
+| `PROXY_COMPRESS` | `1` | gzip text for browsers that accept it |
+| `PROXY_IMAGE_QUALITY` | `40` | Re-encode images as JPEG at this quality (`0` = off) |
+| `PROXY_IMAGE_MAX_WIDTH` | `640` | Shrink wider images (`0` = no limit) |
 | `CONTROL_PORT` | `2323` | Port of `SERSHTCP.EXE` on the PC |
 
 Restart the services after editing by hand: `sudo systemctl restart retrogw-gateway retrogw-proxy`.
@@ -162,6 +199,13 @@ DLLs and that no Pentium Pro-only instructions slipped in.
 The PPP link has no authentication, and `SERSHTCP` / `SERSHELL` have no
 password. `SERSHTCP` accepts connections only from the gateway's address by
 default. Use this on a direct cable between machines you own.
+
+The web proxy listens on all interfaces, so other machines on your LAN can use
+it too; firewall port 8080 if that matters. Its certificate authority can
+impersonate any site to a PC that trusts it: only install it on the vintage
+PC, and keep `/var/lib/private/retrogw-proxy/ca.key` private (`uninstall.sh
+--purge` deletes it). Old SSL 3.0/RC4 is weak, which is acceptable only
+because that leg is the serial cable; the internet side always uses modern TLS.
 
 ## License
 

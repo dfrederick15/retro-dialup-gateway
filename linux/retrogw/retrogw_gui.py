@@ -112,14 +112,32 @@ class Settings(QtWidgets.QDialog):
         self.unit = QtWidgets.QSpinBox(); self.unit.setRange(0, 999); self.unit.setValue(int(cfg["PPP_UNIT"]))
         self.unit.setPrefix("ppp"); f2.addRow("PPP interface:", self.unit)
 
-        # services
-        g3 = QtWidgets.QGroupBox("Services"); f3 = QtWidgets.QFormLayout(g3); v.addWidget(g3)
+        # web proxy
+        g3 = QtWidgets.QGroupBox("Web proxy"); f3 = QtWidgets.QFormLayout(g3); v.addWidget(g3)
         self.pport = QtWidgets.QSpinBox(); self.pport.setRange(1, 65535); self.pport.setValue(int(cfg["PROXY_PORT"]))
-        f3.addRow("Web proxy port:", self.pport)
-        self.strip = QtWidgets.QCheckBox("Strip scripts and styles from pages (faster over serial)")
+        f3.addRow("Port:", self.pport)
+        self.strip = QtWidgets.QCheckBox("Strip scripts and styles from pages")
         self.strip.setChecked(cfg["PROXY_STRIP_SCRIPTS"] == "1"); f3.addRow(self.strip)
+        self.tls = QtWidgets.QCheckBox("Accept https:// from the old browser (SSL 3.0 / TLS 1.0)")
+        self.tls.setChecked(cfg["PROXY_TLS"] == "1"); f3.addRow(self.tls)
+        self.tls2http = QtWidgets.QCheckBox("…then switch pages to http:// so plain HTTP crosses the serial line")
+        self.tls2http.setChecked(cfg["PROXY_TLS_TO_HTTP"] == "1"); f3.addRow(self.tls2http)
+        self.tls.toggled.connect(self.tls2http.setEnabled); self.tls2http.setEnabled(self.tls.isChecked())
+        self.gz = QtWidgets.QCheckBox("Compress pages with gzip (browsers that support it)")
+        self.gz.setChecked(cfg["PROXY_COMPRESS"] == "1"); f3.addRow(self.gz)
+        self.imgq = QtWidgets.QSpinBox(); self.imgq.setRange(0, 95); self.imgq.setValue(int(cfg["PROXY_IMAGE_QUALITY"]))
+        self.imgq.setSpecialValueText("off (pass images through)")
+        f3.addRow("Image JPEG quality:", self.imgq)
+        self.imgw = QtWidgets.QSpinBox(); self.imgw.setRange(0, 4096); self.imgw.setSingleStep(32)
+        self.imgw.setValue(int(cfg["PROXY_IMAGE_MAX_WIDTH"])); self.imgw.setSuffix(" px")
+        self.imgw.setSpecialValueText("no limit"); f3.addRow("Shrink images wider than:", self.imgw)
+        hint = QtWidgets.QLabel("For https://: install the certificate from <b>http://%s:%s/</b> on the PC, "
+                                "and set its Security proxy like the HTTP proxy." % (cfg["LOCAL_IP"], cfg["PROXY_PORT"]))
+        hint.setStyleSheet("color:gray;"); f3.addRow(hint)
+
+        g4 = QtWidgets.QGroupBox("Remote control"); f4 = QtWidgets.QFormLayout(g4); v.addWidget(g4)
         self.cport = QtWidgets.QSpinBox(); self.cport.setRange(1, 65535); self.cport.setValue(int(cfg["CONTROL_PORT"]))
-        f3.addRow("SERSHTCP control port:", self.cport)
+        f4.addRow("SERSHTCP control port:", self.cport)
 
         self.restart = QtWidgets.QCheckBox("Restart running services to apply (drops an active call)")
         self.restart.setChecked(True); v.addWidget(self.restart)
@@ -156,6 +174,8 @@ class Settings(QtWidgets.QDialog):
         self.dns1.setText(d["DNS1"]); self.dns2.setText(d["DNS2"]); self.uplink.setCurrentIndex(0)
         self.unit.setValue(int(d["PPP_UNIT"])); self.pport.setValue(int(d["PROXY_PORT"]))
         self.strip.setChecked(True); self.cport.setValue(int(d["CONTROL_PORT"]))
+        self.tls.setChecked(True); self.tls2http.setChecked(True); self.gz.setChecked(True)
+        self.imgq.setValue(int(d["PROXY_IMAGE_QUALITY"])); self.imgw.setValue(int(d["PROXY_IMAGE_MAX_WIDTH"]))
 
     def _save(self):
         up = self.uplink.currentData() if self.uplink.currentIndex() >= 0 and \
@@ -165,6 +185,10 @@ class Settings(QtWidgets.QDialog):
                    DNS1=self.dns1.text().strip(), DNS2=self.dns2.text().strip(), UPLINK=up or "",
                    PPP_UNIT=str(self.unit.value()), PROXY_PORT=str(self.pport.value()),
                    PROXY_STRIP_SCRIPTS="1" if self.strip.isChecked() else "0",
+                   PROXY_TLS="1" if self.tls.isChecked() else "0",
+                   PROXY_TLS_TO_HTTP="1" if self.tls2http.isChecked() else "0",
+                   PROXY_COMPRESS="1" if self.gz.isChecked() else "0",
+                   PROXY_IMAGE_QUALITY=str(self.imgq.value()), PROXY_IMAGE_MAX_WIDTH=str(self.imgw.value()),
                    CONTROL_PORT=str(self.cport.value()))
         errs = C.validate(new)
         if errs:
@@ -271,16 +295,16 @@ class Win(QtWidgets.QMainWindow):
 
         gp = QtWidgets.QGroupBox("Web proxy"); v.addWidget(gp)
         g = QtWidgets.QGridLayout(gp); g.setHorizontalSpacing(18)
-        fields = [("Status", "pst"), ("Browser setting", "pset"), ("Page slimming", "pslim"),
+        fields = [("Status", "pst"), ("Browser setting", "pset"), ("HTTPS", "ptls"),
                   ("Requests", "preq"), ("Clients", "pcli"), ("Avg time", "pavg"),
                   ("Fetched", "pin"), ("Sent to PC", "pout"), ("Saved", "psave"),
-                  ("Last request", "plast")]
+                  ("Optimizing", "pslim"), ("Last request", "plast")]
         for i, (lab, key) in enumerate(fields):
-            r, c = divmod(i, 3)
+            r, c = divmod(i, 3) if i < 9 else (3 + i - 9, 0)
             l = QtWidgets.QLabel(lab + ":"); l.setStyleSheet("color:gray;")
             val = QtWidgets.QLabel("–"); val.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
             g.addWidget(l, r, c * 2)
-            if key == "plast":      # full-width row, elided by its tooltip
+            if i >= 9:              # full-width rows
                 val.setMinimumWidth(10); g.addWidget(val, r, 1, 1, 5)
             else: g.addWidget(val, r, c * 2 + 1)
             self.st[key] = val
@@ -368,16 +392,32 @@ class Win(QtWidgets.QMainWindow):
 
     # ---- web proxy stats (from its per-request journal lines) ----
     def _preset(self):
-        self.pc = dict(n=0, err=0, nin=0, nout=0, ms=0, html=0); self.plisten = None
+        self.pc = dict(n=0, err=0, nin=0, nout=0, ms=0, tls=0, tlsfail=0, gz=0, img=0, redir=0)
+        self.plisten = None; self.ptls = None; self.pfp = None
         self.st["plast"].setText("–"); self.st["plast"].setToolTip("")
 
     def _pstats(self, active):
-        S = self.st; port = self.cfg["PROXY_PORT"]; pc = self.pc
+        S = self.st; port = self.cfg["PROXY_PORT"]; pc = self.pc; c = self.cfg
         S["pst"].setText(("Running – listening on %s" % (self.plisten or "port " + port))
                          if active else "Stopped")
-        S["pset"].setText("HTTP proxy %s port %s  (http:// URLs)" % (self.cfg["LOCAL_IP"], port))
-        S["pslim"].setText("scripts & styles removed" if self.cfg["PROXY_STRIP_SCRIPTS"] != "0"
-                           else "off (pages passed through)")
+        S["pset"].setText("HTTP + Security proxy %s : %s" % (c["LOCAL_IP"], port))
+        if c["PROXY_TLS"] == "0":
+            S["ptls"].setText("off (http:// only)"); S["ptls"].setToolTip("")
+        else:
+            S["ptls"].setText("%d accepted, %d failed%s" % (pc["tls"], pc["tlsfail"],
+                              "  (last: %s)" % self.ptls if self.ptls else ""))
+            S["ptls"].setToolTip("Install the certificate on the PC from http://%s:%s/" % (c["LOCAL_IP"], port)
+                                 + ("\nCA SHA-1: " + self.pfp if self.pfp else ""))
+        opt = []
+        if c["PROXY_STRIP_SCRIPTS"] != "0": opt.append("scripts/styles stripped")
+        if c["PROXY_COMPRESS"] != "0": opt.append("gzip (%d sent)" % pc["gz"])
+        if c["PROXY_IMAGE_QUALITY"] != "0":
+            opt.append("images → JPEG q%s%s (%d re-encoded)" % (c["PROXY_IMAGE_QUALITY"],
+                       ", ≤%spx" % c["PROXY_IMAGE_MAX_WIDTH"] if c["PROXY_IMAGE_MAX_WIDTH"] != "0" else "",
+                       pc["img"]))
+        if c["PROXY_TLS"] != "0" and c["PROXY_TLS_TO_HTTP"] != "0":
+            opt.append("https → http on the wire (%d)" % pc["redir"])
+        S["pslim"].setText(";  ".join(opt) or "off (pages passed through)")
         S["preq"].setText("%d  (%d failed)" % (pc["n"], pc["err"]) if pc["n"] else "none yet")
         S["pavg"].setText("%.1f s" % (pc["ms"] / pc["n"] / 1000.0) if pc["n"] else "–")
         S["pin"].setText(hsize(pc["nin"])); S["pout"].setText(hsize(pc["nout"]))
@@ -391,15 +431,32 @@ class Win(QtWidgets.QMainWindow):
     def _ptrack(self, ln, msg):
         if msg.startswith("retroproxy on "):
             self._preset(); self.plisten = msg.split()[2]; return
+        if msg.startswith("CA certificate SHA-1 "):
+            self.pfp = msg.split()[3]; return
         if not msg.startswith("[proxy] REQ "): return
-        p = msg.split(None, 8)
+        # [proxy] REQ client method code in= out= ms= flags= url [(note)]
+        p = msg.split(None, 9)
         if len(p) < 9: return
-        _, _, client, method, code, nin, nout, ms, url = p
+        if p[8].startswith("flags="):
+            if len(p) < 10: return
+            flags, url = p[8][6:].split(","), p[9]
+        else:                                   # older log lines without flags
+            flags, url = [], " ".join(p[8:])
+        method, code = p[3], p[4]
         try:
-            nin, nout, ms = (int(x.split("=", 1)[1]) for x in (nin, nout, ms))
+            nin, nout, ms = (int(x.split("=", 1)[1]) for x in p[5:8])
         except ValueError: return
-        pc = self.pc; pc["n"] += 1; pc["nin"] += nin; pc["nout"] += nout; pc["ms"] += ms
-        if not code.isdigit() or int(code) >= 400 or " (" in url: pc["err"] += 1
+        pc = self.pc; bad = not code.isdigit() or int(code) >= 400
+        if method == "CONNECT":                 # SSL/TLS handshake from the old browser
+            if code == "200":
+                pc["tls"] += 1
+                if " (" in url: self.ptls = url.split(" (", 1)[1].rstrip(")")
+            elif code != "501": pc["tlsfail"] += 1
+            else: pc["err"] += 1
+        else:
+            pc["n"] += 1; pc["nin"] += nin; pc["nout"] += nout; pc["ms"] += ms
+            pc["err"] += bad
+            for f in ("gz", "img", "redir"): pc[f] += f in flags
         ts = ln.split()[2] if len(ln.split()) > 2 else ""
         short = url if len(url) <= 90 else url[:87] + "…"
         self.st["plast"].setText("%s  %s %s  %s  %s, %.1f s" % (ts, method, code, short, hsize(nout), ms / 1000.0))
