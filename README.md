@@ -108,6 +108,9 @@ The proxy does the modern-web work so the old PC doesn't have to:
   redirects the page to `http://`, so **plain HTTP crosses the serial line**
   instead of encryption the 486 has to grind through. Form posts stay inside
   TLS so nothing is lost.
+  Programs that offer TLS 1.2 or newer (e.g. Discord Messenger) do their
+  own encryption and wouldn't trust the gateway's certificate, so their
+  connections are passed through untouched.
 - **Compression.** Pages are gzipped for browsers that send
   `Accept-Encoding: gzip` (Wikipedia: 551 KB → 83 KB). Images are re-encoded
   as baseline JPEGs at quality 40 and at most 640 px wide, which also makes

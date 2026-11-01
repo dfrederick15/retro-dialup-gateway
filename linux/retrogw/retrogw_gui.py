@@ -392,7 +392,7 @@ class Win(QtWidgets.QMainWindow):
 
     # ---- web proxy stats (from its per-request journal lines) ----
     def _preset(self):
-        self.pc = dict(n=0, err=0, nin=0, nout=0, ms=0, tls=0, tlsfail=0, gz=0, img=0, redir=0)
+        self.pc = dict(n=0, err=0, nin=0, nout=0, ms=0, tls=0, tlsfail=0, gz=0, img=0, redir=0, tunnel=0)
         self.plisten = None; self.ptls = None; self.pfp = None
         self.st["plast"].setText("–"); self.st["plast"].setToolTip("")
 
@@ -404,7 +404,8 @@ class Win(QtWidgets.QMainWindow):
         if c["PROXY_TLS"] == "0":
             S["ptls"].setText("off (http:// only)"); S["ptls"].setToolTip("")
         else:
-            S["ptls"].setText("%d accepted, %d failed%s" % (pc["tls"], pc["tlsfail"],
+            S["ptls"].setText("%d accepted, %d failed, %d passed through%s" % (
+                              pc["tls"], pc["tlsfail"], pc["tunnel"],
                               "  (last: %s)" % self.ptls if self.ptls else ""))
             S["ptls"].setToolTip("Install the certificate on the PC from http://%s:%s/" % (c["LOCAL_IP"], port)
                                  + ("\nCA SHA-1: " + self.pfp if self.pfp else ""))
@@ -447,7 +448,10 @@ class Win(QtWidgets.QMainWindow):
             nin, nout, ms = (int(x.split("=", 1)[1]) for x in p[5:8])
         except ValueError: return
         pc = self.pc; bad = not code.isdigit() or int(code) >= 400
-        if method == "CONNECT":                 # SSL/TLS handshake from the old browser
+        if method == "CONNECT" and "tunnel" in flags:   # modern TLS client, passed through
+            pc["tunnel"] += 1; pc["nin"] += nin; pc["nout"] += nout
+            pc["err"] += bad
+        elif method == "CONNECT":               # SSL/TLS handshake from the old browser
             if code == "200":
                 pc["tls"] += 1
                 if " (" in url: self.ptls = url.split(" (", 1)[1].rstrip(")")

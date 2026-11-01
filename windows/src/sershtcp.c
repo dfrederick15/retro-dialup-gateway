@@ -196,7 +196,7 @@ static int uninstall(void){
 }
 
 void entry(void){
-    WSADATA w; SOCKET ls; struct sockaddr_in a; int al, one=1, i;
+    WSADATA w; SOCKET ls; struct sockaddr_in a; int al, i;
     char *args[12]; int na=get_args(args,12);
     DWORD port=2323; const char *allow="192.168.95.1"; unsigned long allow_ip;
     int hide=0, do_inst=0, do_uninst=0;
@@ -216,14 +216,21 @@ void entry(void){
     if(do_inst)   ExitProcess(install(port,allow));
     if(hide) FreeConsole();
 
-    if(WSAStartup(0x0101,&w)) ExitProcess(1);
+    /* At logon (Run key) the TCP/IP stack may not be ready yet: keep
+     * retrying instead of exiting. No SO_REUSEADDR - on Windows it would let
+     * a second copy share the port; this way a duplicate just exits. */
     allow_ip = ieq(allow,"any") ? INADDR_NONE : inet_addr(allow);
-    ls=socket(AF_INET,SOCK_STREAM,0);
-    if(ls==INVALID_SOCKET){ WSACleanup(); ExitProcess(2); }
-    setsockopt(ls,SOL_SOCKET,SO_REUSEADDR,(char*)&one,sizeof(one));
-    a.sin_family=AF_INET; a.sin_port=htons((u_short)port); a.sin_addr.s_addr=INADDR_ANY;
-    if(bind(ls,(struct sockaddr*)&a,sizeof(a))){ WSACleanup(); ExitProcess(3); }
-    listen(ls,1);
+    for(;;){
+        if(WSAStartup(0x0101,&w)){ Sleep(5000); continue; }
+        ls=socket(AF_INET,SOCK_STREAM,0);
+        if(ls!=INVALID_SOCKET){
+            a.sin_family=AF_INET; a.sin_port=htons((u_short)port); a.sin_addr.s_addr=INADDR_ANY;
+            if(!bind(ls,(struct sockaddr*)&a,sizeof(a)) && !listen(ls,1)) break;
+            if(WSAGetLastError()==WSAEADDRINUSE){ closesocket(ls); WSACleanup(); ExitProcess(3); }
+            closesocket(ls);
+        }
+        WSACleanup(); Sleep(5000);
+    }
     for(;;){
         al=sizeof(a);
         g_cs=accept(ls,(struct sockaddr*)&a,&al);

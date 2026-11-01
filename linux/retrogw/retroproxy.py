@@ -20,7 +20,7 @@ LOCAL_IP:PROXY_PORT (default 192.168.95.1:8080).
 
 Settings: PROXY_* keys in /etc/retrogw/retrogw.conf.
 """
-import os, sys, ssl, gzip, zlib, io, re, socket, time, threading, html
+import os, sys, ssl, gzip, zlib, io, re, socket, time, threading, html, select
 from http.server import BaseHTTPRequestHandler
 from socketserver import ThreadingTCPServer
 import urllib.request, urllib.error
@@ -352,9 +352,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_CONNECT(self):
         self._t0 = time.time()
         host, _, port = self.path.rpartition(":")
-        if not (CA and TLS) or self.tls_origin or not host or port not in ("443", "8443", "563"):
-            why = ("https termination is off; use http:// URLs" if not CA
-                   else "only https ports are supported")
+        if self.tls_origin or not host or port not in ("443", "8443", "563"):
+            why = "only https ports are supported"
             self.send_error(501, why)
             return self._log("CONNECT", 501, self.path, note=why)
         self.send_response(200, "Connection established"); self.end_headers()
@@ -364,6 +363,12 @@ class Handler(BaseHTTPRequestHandler):
             hello = self.connection.recv(2048, socket.MSG_PEEK)
         except OSError:
             hello = b""
+        # Terminate only clients that need it. A client offering TLS 1.2+
+        # (e.g. Discord Messenger) does its own modern TLS and wouldn't trust
+        # our CA, so pass it straight through.
+        modern = len(hello) > 10 and hello[0] == 0x16 and (hello[9], hello[10]) >= (3, 3)
+        if modern or not (CA and TLS):
+            return self._tunnel(host, int(port))
         conn = TLSConnection(self.connection)
         try:
             chain = X509CertChain([X509().parse(CA.host_cert_pem(host))])
@@ -387,6 +392,32 @@ class Handler(BaseHTTPRequestHandler):
             try: conn.close()
             except Exception: pass
         self.close_connection = True
+
+    def _tunnel(self, host, port):
+        """Relay bytes unchanged between the client and host:port."""
+        self.close_connection = True
+        try:
+            up = socket.create_connection((host, port), timeout=20)
+        except OSError as e:
+            return self._log("CONNECT", 502, self.path, flags=["tunnel"], note=str(e))
+        c = self.connection; c.settimeout(None); up.settimeout(None)
+        n_up = n_down = 0
+        try:
+            while True:
+                r, _, _ = select.select([c, up], [], [], self.timeout)
+                if not r: break
+                for src in r:
+                    d = src.recv(65536)
+                    if not d: raise EOFError
+                    (up if src is c else c).sendall(d)
+                    if src is c: n_up += len(d)
+                    else: n_down += len(d)
+        except (EOFError, OSError):
+            pass
+        finally:
+            up.close()
+        self._log("CONNECT", 200, self.path, n_down, n_down, ["tunnel"],
+                  note="passed through, %d bytes up" % n_up)
 
 class TLSHandler(Handler):
     """Serves HTTP requests that arrive inside a terminated CONNECT."""
