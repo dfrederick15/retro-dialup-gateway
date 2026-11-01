@@ -1,0 +1,13 @@
+// Members of the "retrogw" group may start/stop/restart the gateway and
+// proxy services without a password (used by the retrogw control panel).
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        subject.isInGroup("retrogw")) {
+        var unit = action.lookup("unit");
+        var verb = action.lookup("verb");
+        if ((unit == "retrogw-gateway.service" || unit == "retrogw-proxy.service") &&
+            (verb == "start" || verb == "stop" || verb == "restart")) {
+            return polkit.Result.YES;
+        }
+    }
+});

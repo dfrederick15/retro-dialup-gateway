@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Retro Dial-Up Gateway
+GenericName=Dial-up gateway for vintage PCs
+Comment=Internet and remote control for Windows 95/98/ME/2000/XP over a serial cable
+Exec=retrogw
+Icon=network-modem
+Terminal=false
+Categories=Network;System;
+Keywords=dialup;ppp;modem;serial;windows95;retro;

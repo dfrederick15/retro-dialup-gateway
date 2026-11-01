@@ -1,0 +1,19 @@
+[Unit]
+Description=Retro dial-up gateway (fake modem + PPP + internet sharing)
+Documentation=https://github.com/dfrederick15/retro-dialup-gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=PYTHONUNBUFFERED=1
+ExecStartPre=/opt/retrogw/nat-up.sh
+ExecStart=/usr/bin/python3 /opt/retrogw/vmodem.py
+ExecStopPost=/opt/retrogw/nat-down.sh
+Restart=on-failure
+RestartSec=5
+# exit 2 = bad config: don't spin, wait for the user to fix it
+RestartPreventExitStatus=2
+
+[Install]
+WantedBy=multi-user.target
