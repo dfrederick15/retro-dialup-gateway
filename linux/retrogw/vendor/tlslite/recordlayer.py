@@ -30,7 +30,7 @@ from .utils.constanttime import ct_compare_digest, ct_check_cbc_mac_and_pad
 from .errors import TLSRecordOverflow, TLSIllegalParameterException,\
         TLSAbruptCloseError, TLSDecryptionFailed, TLSBadRecordMAC, \
         TLSUnexpectedMessage
-from .mathtls import createMAC_SSL, createHMAC, calc_key
+from .mathtls import createMAC_SSL, createHMAC, calc_key, PRF
 
 class RecordSocket(object):
     """
@@ -1061,7 +1061,8 @@ class RecordLayer(object):
             keyLength = 32
             ivLength = 16
             createCipherFunc = createAES
-        elif cipherSuite in CipherSuite.rc4Suites:
+        elif cipherSuite in CipherSuite.rc4Suites or \
+                cipherSuite in CipherSuite.rc4ExportSuites:   # retrogw patch
             keyLength = 16
             ivLength = 0
             createCipherFunc = createRC4
@@ -1199,6 +1200,15 @@ class RecordLayer(object):
         else:
             createMACFunc = self._getHMACMethod(self.version)
 
+        # retrogw patch: export suites take only a few bytes of key material
+        # from the key block and stretch them to the full key with the
+        # randoms (SSL 3.0: MD5; TLS 1.0: PRF). Stream ciphers only.
+        exportLength = CipherSuite.exportKeyLength.get(cipherSuite)
+        fullKeyLength = keyLength
+        if exportLength:
+            assert ivLength == 0 and self.version <= (3, 1)
+            keyLength = exportLength
+
         outputLength = (macLength*2) + (keyLength*2) + (ivLength*2)
 
         #Calculate Keying Material from Master Secret
@@ -1217,6 +1227,20 @@ class RecordLayer(object):
         serverKeyBlock = parser.getFixBytes(keyLength)
         clientIVBlock = parser.getFixBytes(ivLength)
         serverIVBlock = parser.getFixBytes(ivLength)
+
+        if exportLength:                                   # retrogw patch
+            if self.version == (3, 0):
+                clientKeyBlock = MD5(clientKeyBlock + clientRandom +
+                                     serverRandom)[:fullKeyLength]
+                serverKeyBlock = MD5(serverKeyBlock + serverRandom +
+                                     clientRandom)[:fullKeyLength]
+            else:
+                clientKeyBlock = PRF(clientKeyBlock, b"client write key",
+                                     clientRandom + serverRandom,
+                                     fullKeyLength)
+                serverKeyBlock = PRF(serverKeyBlock, b"server write key",
+                                     clientRandom + serverRandom,
+                                     fullKeyLength)
 
         if digestmod:
             # Legacy cipher

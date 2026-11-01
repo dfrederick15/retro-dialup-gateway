@@ -728,6 +728,9 @@ class CipherSuite:
     ietfNames[0x0004] = 'TLS_RSA_WITH_RC4_128_MD5'
     TLS_RSA_WITH_RC4_128_SHA = 0x0005
     ietfNames[0x0005] = 'TLS_RSA_WITH_RC4_128_SHA'
+    # retrogw patch: 56-bit export suite offered by export-grade Netscape 4.x
+    TLS_RSA_EXPORT1024_WITH_RC4_56_SHA = 0x0064
+    ietfNames[0x0064] = 'TLS_RSA_EXPORT1024_WITH_RC4_56_SHA'
     TLS_RSA_WITH_3DES_EDE_CBC_SHA = 0x000A
     ietfNames[0x000A] = 'TLS_RSA_WITH_3DES_EDE_CBC_SHA'
     TLS_DH_DSS_WITH_3DES_EDE_CBC_SHA = 0x000D
@@ -1134,6 +1137,10 @@ class CipherSuite:
     chacha20Suites.append(TLS_CHACHA20_POLY1305_SHA256)
 
     #: RC4 128 stream cipher
+    #: retrogw patch: export RC4 suites -> length of the export key material
+    exportKeyLength = {TLS_RSA_EXPORT1024_WITH_RC4_56_SHA: 7}
+    rc4ExportSuites = [TLS_RSA_EXPORT1024_WITH_RC4_56_SHA]
+
     rc4Suites = []
     rc4Suites.append(TLS_ECDHE_RSA_WITH_RC4_128_SHA)
     rc4Suites.append(TLS_ECDHE_ECDSA_WITH_RC4_128_SHA)
@@ -1170,6 +1177,7 @@ class CipherSuite:
     shaSuites.append(TLS_RSA_WITH_AES_128_CBC_SHA)
     shaSuites.append(TLS_RSA_WITH_AES_256_CBC_SHA)
     shaSuites.append(TLS_RSA_WITH_RC4_128_SHA)
+    shaSuites.append(TLS_RSA_EXPORT1024_WITH_RC4_56_SHA)  # retrogw patch
     shaSuites.append(TLS_DHE_RSA_WITH_3DES_EDE_CBC_SHA)
     shaSuites.append(TLS_DHE_RSA_WITH_AES_128_CBC_SHA)
     shaSuites.append(TLS_DHE_RSA_WITH_AES_256_CBC_SHA)
@@ -1390,6 +1398,8 @@ class CipherSuite:
             cipherSuites += CipherSuite.tripleDESSuites
         if "rc4" in cipherNames:
             cipherSuites += CipherSuite.rc4Suites
+        if "rc4export" in cipherNames and version <= (3, 1):   # retrogw patch
+            cipherSuites += CipherSuite.rc4ExportSuites
         if "null" in cipherNames:
             cipherSuites += CipherSuite.nullSuites
 
@@ -1479,6 +1489,7 @@ class CipherSuite:
     certSuites.append(TLS_RSA_WITH_3DES_EDE_CBC_SHA)
     certSuites.append(TLS_RSA_WITH_RC4_128_SHA)
     certSuites.append(TLS_RSA_WITH_RC4_128_MD5)
+    certSuites.append(TLS_RSA_EXPORT1024_WITH_RC4_56_SHA)  # retrogw patch, last resort
     certSuites.append(TLS_RSA_WITH_NULL_MD5)
     certSuites.append(TLS_RSA_WITH_NULL_SHA)
     certSuites.append(TLS_RSA_WITH_NULL_SHA256)
@@ -1626,6 +1637,8 @@ class CipherSuite:
             return "aes256"
         elif ciphersuite in CipherSuite.rc4Suites:
             return "rc4"
+        elif ciphersuite in CipherSuite.rc4ExportSuites:   # retrogw patch
+            return "rc4export"
         elif ciphersuite in CipherSuite.tripleDESSuites:
             return "3des"
         elif ciphersuite in CipherSuite.nullSuites:

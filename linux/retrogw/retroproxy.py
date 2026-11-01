@@ -63,7 +63,8 @@ if TLS_ON:
         CA = retrogw_ca.CA(STATE)
         TLS = HandshakeSettings()
         TLS.minVersion, TLS.maxVersion = (3, 0), (3, 3)     # SSL 3.0 .. TLS 1.2
-        TLS.cipherNames = ["aes128", "aes256", "rc4", "3des"]   # RC4 is cheapest for a 486
+        TLS.cipherNames = ["aes128", "aes256", "rc4", "3des",   # RC4 is cheapest for a 486
+                           "rc4export"]   # 56-bit, for export-grade Netscape 4.x (last resort)
         TLS.macNames = ["sha", "sha256", "md5"]             # md5 for RC4-MD5
         TLS.keyExchangeNames = ["rsa"]                      # what 9x clients use
         TLS.useEncryptThenMAC = False
@@ -209,6 +210,33 @@ def info_html():
     return (INFO_PAGE % (tls, "on" if STRIP_SCRIPTS else "off",
                          "on" if COMPRESS else "off", img)).encode()
 
+# names for the suites 1990s browsers offer (for handshake-failure logs)
+SUITES = {0x0001: "NULL-MD5", 0x0002: "NULL-SHA", 0x0003: "EXP-RC4-MD5", 0x0004: "RC4-MD5",
+          0x0005: "RC4-SHA", 0x0006: "EXP-RC2-MD5", 0x0008: "EXP-DES-SHA", 0x0009: "DES-SHA",
+          0x000a: "3DES-SHA", 0x0062: "EXP1024-DES-SHA", 0x0064: "EXP1024-RC4-SHA",
+          0x002f: "AES128-SHA", 0x003c: "AES128-SHA256", 0x003d: "AES256-SHA256",
+          0x009c: "AES128-GCM-SHA256", 0x009d: "AES256-GCM-SHA384", 0x0035: "AES256-SHA", 0xfeff: "FIPS-3DES-SHA",
+          0xfefe: "FIPS-DES-SHA", 0xffe0: "FIPS-RC4-SHA", 0xffe1: "FIPS-DES-SHA(old)",
+          0x010080: "SSL2-RC4-MD5", 0x020080: "SSL2-EXP-RC4-MD5", 0x030080: "SSL2-RC2-MD5",
+          0x040080: "SSL2-EXP-RC2-MD5", 0x060040: "SSL2-DES-MD5", 0x0700c0: "SSL2-3DES-MD5"}
+
+def offered_suites(hello):
+    """Cipher suites in a ClientHello (SSLv2 or SSLv3/TLS record format)."""
+    try:
+        if hello[0] & 0x80 and hello[2] == 1:            # SSLv2-format hello
+            cl = int.from_bytes(hello[5:7], "big"); specs = hello[11:11 + cl]
+            ids = [int.from_bytes(specs[i:i + 3], "big") for i in range(0, len(specs), 3)]
+            ver = "SSLv2 hello for %d.%d" % (hello[3], hello[4])
+        elif hello[0] == 0x16:                           # TLS record, ClientHello
+            b = hello[5:]; ver = "hello for %d.%d" % (b[4], b[5]); i = 4 + 2 + 32
+            i += 1 + b[i]; n = int.from_bytes(b[i:i + 2], "big")
+            ids = [int.from_bytes(b[i + 2 + j:i + 4 + j], "big") for j in range(0, n, 2)]
+        else:
+            return "not an SSL/TLS hello"
+        return "%s offering %s" % (ver, ", ".join(SUITES.get(x, "0x%04x" % x) for x in ids))
+    except Exception:
+        return "unparseable hello"
+
 # ---- the proxy ----
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.0"
@@ -331,6 +359,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._log("CONNECT", 501, self.path, note=why)
         self.send_response(200, "Connection established"); self.end_headers()
         self.wfile.flush()
+        try:
+            self.connection.settimeout(30)
+            hello = self.connection.recv(2048, socket.MSG_PEEK)
+        except OSError:
+            hello = b""
         conn = TLSConnection(self.connection)
         try:
             chain = X509CertChain([X509().parse(CA.host_cert_pem(host))])
@@ -338,11 +371,12 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self.close_connection = True
             return self._log("CONNECT", 525, self.path,
-                             note="SSL/TLS handshake failed: %s" % (str(e) or type(e).__name__))
+                             note="SSL/TLS handshake failed: %s; %s" % (
+                                 str(e) or type(e).__name__, offered_suites(hello)))
         ver = {(3, 0): "SSL 3.0", (3, 1): "TLS 1.0", (3, 2): "TLS 1.1", (3, 3): "TLS 1.2"}.get(
             conn.version, str(conn.version))
         self._log("CONNECT", 200, self.path, flags=["tls"],
-                  note="%s %s" % (ver, conn.getCipherName()))
+                  note="%s %s" % (ver, SUITES.get(conn.session.cipherSuite, conn.getCipherName())))
         try:
             inner = TLSHandler.__new__(TLSHandler)
             inner.tls_origin = self.path

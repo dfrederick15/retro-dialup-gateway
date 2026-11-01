@@ -11,10 +11,14 @@ Choices made for 1990s clients:
   * Valid 2000-01-01 .. 2049-12-31 (UTCTime range), so a PC with a wrong
     clock still accepts it.
   * Short serial numbers and plain X.509v3 extensions.
+  * Names as PrintableString: Netscape 4's DER decoder predates UTF8String
+    and rejects such certificates as "improperly formatted DER".
+  * Host certificates carry only subjectAltName (modern clients need it).
 """
 import os, threading, datetime, ipaddress, hashlib, socket
 from cryptography import x509
-from cryptography.x509.oid import NameOID, ExtendedKeyUsageOID
+from cryptography.x509.oid import NameOID
+from cryptography.x509.name import _ASN1Type
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 
@@ -41,6 +45,13 @@ def _sign_sha1(builder, key):
     bits = b"\x03" + _der_len(len(sig) + 1) + b"\x00" + sig
     body = tbs + _ALG1 + bits
     return x509.load_der_x509_certificate(b"\x30" + _der_len(len(body)) + body)
+
+_PRINTABLE = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 '()+,-./:=?")
+
+def _attr(oid, value):
+    """Name attribute as PrintableString when possible, else IA5String."""
+    t = _ASN1Type.PrintableString if set(value) <= _PRINTABLE else _ASN1Type.IA5String
+    return x509.NameAttribute(oid, value, _type=t)
 
 def _serial():
     return int.from_bytes(os.urandom(8), "big") >> 1 or 1
@@ -79,9 +90,12 @@ class CA:
         p = os.path.join(self.dir, "ca.crt")
         if os.path.exists(p):
             return key, x509.load_pem_x509_certificate(open(p, "rb").read())
-        name = x509.Name([
-            x509.NameAttribute(NameOID.COMMON_NAME, "Retro Dial-Up Gateway CA (%s)" % socket.gethostname()[:20]),
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Retro Dial-Up Gateway")])
+        # date in the name keeps it distinct from earlier CAs in old cert stores
+        cn = "Retro Dial-Up Gateway CA %s (%s)" % (
+            datetime.date.today().isoformat(),
+            "".join(c for c in socket.gethostname()[:20] if c in _PRINTABLE))
+        name = x509.Name([_attr(NameOID.ORGANIZATION_NAME, "Retro Dial-Up Gateway"),
+                          _attr(NameOID.COMMON_NAME, cn)])
         ski = x509.SubjectKeyIdentifier.from_public_key(key.public_key())
         cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
                 .public_key(key.public_key()).serial_number(_serial())
@@ -116,14 +130,10 @@ class CA:
         except ValueError:
             san = x509.DNSName(host)
         cert = (x509.CertificateBuilder()
-                .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, host[:64])]))
+                .subject_name(x509.Name([_attr(NameOID.COMMON_NAME, host[:64])]))
                 .issuer_name(self.ca_cert.subject)
                 .public_key(self.host_key.public_key()).serial_number(_serial())
                 .not_valid_before(NOT_BEFORE).not_valid_after(NOT_AFTER)
-                .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
-                .add_extension(x509.KeyUsage(True, False, True, False, False, False, False, False, False),
-                               critical=False)
-                .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
                 .add_extension(x509.SubjectAlternativeName([san]), critical=False))
         cert = _sign_sha1(cert, self.ca_key)
         pem = cert.public_bytes(serialization.Encoding.PEM).decode()

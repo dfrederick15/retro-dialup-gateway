@@ -20,7 +20,8 @@ CIPHER_NAMES = ["chacha20-poly1305",
                 "3des"]
 ALL_CIPHER_NAMES = CIPHER_NAMES + ["chacha20-poly1305_draft00",
                                    "aes128ccm_8", "aes256ccm_8",
-                                   "rc4", "null"]
+                                   "rc4", "null",
+                                   "rc4export"]  # retrogw patch
 # Don't allow "md5" by default
 MAC_NAMES = ["sha", "sha256", "sha384", "aead"]
 ALL_MAC_NAMES = MAC_NAMES + ["md5"]
