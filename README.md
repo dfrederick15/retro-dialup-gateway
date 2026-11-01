@@ -76,6 +76,7 @@ driver, creating the dial-up connection and setting the browser proxy) are in
 - **Gateway / Proxy** start and stop buttons, with a live status line.
 - **Network stats**: modem state, last dial, connection time, addresses, latency, RX/TX bytes, packets and speed, line utilization, peaks and errors.
 - **Dialing log**: the modem's AT command exchange and the PPP setup, as they happen.
+- **Web proxy**: status, the browser setting to use, requests and failures, open connections, average fetch time, data fetched vs. sent to the PC (and how much page slimming saved), and the last URL. The **Proxy log** tab lists every request.
 - **Console**: run commands on the PC, and push or get files.
 - **Settings menu**: serial port, speed, IP addresses, DNS, which interface to share internet from, the PPP interface, proxy options and the control port.
 
@@ -88,6 +89,7 @@ retrogw-ctl get C:\AUTOEXEC.BAT       # pull a file
 retrogw-ctl                           # interactive
 retrogw-serial "ver"                  # same over bare serial (SERSHELL.EXE, not dialed in)
 journalctl -u retrogw-gateway -f      # dialing / PPP log
+journalctl -u retrogw-proxy -f        # web proxy requests
 ```
 
 ## Configuration

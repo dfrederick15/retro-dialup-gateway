@@ -94,6 +94,14 @@ if command -v systemctl >/dev/null && systemctl is-active -q ModemManager 2>/dev
   echo "          If dialing is flaky:  sudo systemctl disable --now ModemManager"
 fi
 if [ $START = 1 ]; then
+  # upgrade: restart what was already running so the new code loads
+  systemctl try-restart retrogw-proxy.service
+  if ls /sys/class/net | grep -q '^ppp'; then
+    echo "    A PPP link is up: not restarting retrogw-gateway (would hang up the PC)."
+    echo "    Restart it later:  sudo systemctl restart retrogw-gateway"
+  else
+    systemctl try-restart retrogw-gateway.service
+  fi
   systemctl enable --now retrogw-proxy.service retrogw-gateway.service
 else
   systemctl enable retrogw-proxy.service retrogw-gateway.service

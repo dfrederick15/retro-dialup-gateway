@@ -195,7 +195,7 @@ class Win(QtWidgets.QMainWindow):
         self.cfg = C.load()
         self.setWindowTitle("Retro Dial-Up Gateway")
         self.setWindowIcon(QtGui.QIcon.fromTheme("network-modem"))
-        self.resize(900, 720)
+        self.resize(920, 860)
         self._menus(); self._build()
         self.thr = QtCore.QThread(self); self.tcp = Tcp(); self.tcp.moveToThread(self.thr); self.thr.start()
         self.tcp.out.connect(self._append); self.tcp.done.connect(lambda rc: self._append("[rc=%s]\n" % rc))
@@ -269,12 +269,32 @@ class Win(QtWidgets.QMainWindow):
         self.prev = None; self.peak = [0.0, 0.0]; self.latproc = None
         self.modem_state = "unknown"; self.last_dial = "–"; self.sessions = 0
 
+        gp = QtWidgets.QGroupBox("Web proxy"); v.addWidget(gp)
+        g = QtWidgets.QGridLayout(gp); g.setHorizontalSpacing(18)
+        fields = [("Status", "pst"), ("Browser setting", "pset"), ("Page slimming", "pslim"),
+                  ("Requests", "preq"), ("Clients", "pcli"), ("Avg time", "pavg"),
+                  ("Fetched", "pin"), ("Sent to PC", "pout"), ("Saved", "psave"),
+                  ("Last request", "plast")]
+        for i, (lab, key) in enumerate(fields):
+            r, c = divmod(i, 3)
+            l = QtWidgets.QLabel(lab + ":"); l.setStyleSheet("color:gray;")
+            val = QtWidgets.QLabel("–"); val.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+            g.addWidget(l, r, c * 2)
+            if key == "plast":      # full-width row, elided by its tooltip
+                val.setMinimumWidth(10); g.addWidget(val, r, 1, 1, 5)
+            else: g.addWidget(val, r, c * 2 + 1)
+            self.st[key] = val
+        for c in (1, 3, 5): g.setColumnStretch(c, 1)
+        self._preset()
+
         tabs = QtWidgets.QTabWidget(); v.addWidget(tabs, 1)
         mono = QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont)
         self.console = QtWidgets.QPlainTextEdit(); self.console.setReadOnly(True); self.console.setFont(mono)
         tabs.addTab(self.console, "Console (control the PC)")
         self.dlog = QtWidgets.QPlainTextEdit(); self.dlog.setReadOnly(True); self.dlog.setFont(mono)
         self.dlog.setMaximumBlockCount(5000); tabs.addTab(self.dlog, "Dialing log")
+        self.plog = QtWidgets.QPlainTextEdit(); self.plog.setReadOnly(True); self.plog.setFont(mono)
+        self.plog.setMaximumBlockCount(5000); tabs.addTab(self.plog, "Proxy log")
 
         row2 = QtWidgets.QHBoxLayout(); v.addLayout(row2)
         self.bConn = QtWidgets.QPushButton("Connect")
@@ -304,7 +324,8 @@ class Win(QtWidgets.QMainWindow):
     def _poll(self):
         ifc = C.iface(self.cfg); up = os.path.exists("/sys/class/net/%s" % ifc)
         self._stats(up, ifc)
-        gw = "●" if self._active(GW_UNIT) else "○"; px = "●" if self._active(PX_UNIT) else "○"
+        pxa = self._active(PX_UNIT); self._pstats(pxa)
+        gw = "●" if self._active(GW_UNIT) else "○"; px = "●" if pxa else "○"
         link = "<b style='color:#2a2'>PPP UP</b> (%s)" % ifc if up else "<b style='color:#a22'>PPP down</b>"
         self.status.setText("%s &nbsp; Gateway %s &nbsp; Proxy %s (%s:%s)"
                             % (link, gw, px, self.cfg["LOCAL_IP"], self.cfg["PROXY_PORT"]))
@@ -345,6 +366,45 @@ class Win(QtWidgets.QMainWindow):
             self.latproc = QtCore.QProcess(self); self.latproc.finished.connect(self._on_ping)
             self.latproc.start("ping", ["-c1", "-W2", self.cfg["REMOTE_IP"]])
 
+    # ---- web proxy stats (from its per-request journal lines) ----
+    def _preset(self):
+        self.pc = dict(n=0, err=0, nin=0, nout=0, ms=0, html=0); self.plisten = None
+        self.st["plast"].setText("–"); self.st["plast"].setToolTip("")
+
+    def _pstats(self, active):
+        S = self.st; port = self.cfg["PROXY_PORT"]; pc = self.pc
+        S["pst"].setText(("Running – listening on %s" % (self.plisten or "port " + port))
+                         if active else "Stopped")
+        S["pset"].setText("HTTP proxy %s port %s  (http:// URLs)" % (self.cfg["LOCAL_IP"], port))
+        S["pslim"].setText("scripts & styles removed" if self.cfg["PROXY_STRIP_SCRIPTS"] != "0"
+                           else "off (pages passed through)")
+        S["preq"].setText("%d  (%d failed)" % (pc["n"], pc["err"]) if pc["n"] else "none yet")
+        S["pavg"].setText("%.1f s" % (pc["ms"] / pc["n"] / 1000.0) if pc["n"] else "–")
+        S["pin"].setText(hsize(pc["nin"])); S["pout"].setText(hsize(pc["nout"]))
+        S["psave"].setText("%s  (%d%%)" % (hsize(pc["nin"] - pc["nout"]),
+                           100 - pc["nout"] * 100 // pc["nin"]) if pc["nin"] > pc["nout"] else "–")
+        n = 0
+        if active:
+            n = len(run(["ss", "-Htn", "state", "established", "( sport = :%s )" % port]).stdout.splitlines())
+        S["pcli"].setText("%d open connection%s" % (n, "" if n == 1 else "s") if active else "–")
+
+    def _ptrack(self, ln, msg):
+        if msg.startswith("retroproxy on "):
+            self._preset(); self.plisten = msg.split()[2]; return
+        if not msg.startswith("[proxy] REQ "): return
+        p = msg.split(None, 8)
+        if len(p) < 9: return
+        _, _, client, method, code, nin, nout, ms, url = p
+        try:
+            nin, nout, ms = (int(x.split("=", 1)[1]) for x in (nin, nout, ms))
+        except ValueError: return
+        pc = self.pc; pc["n"] += 1; pc["nin"] += nin; pc["nout"] += nout; pc["ms"] += ms
+        if not code.isdigit() or int(code) >= 400 or " (" in url: pc["err"] += 1
+        ts = ln.split()[2] if len(ln.split()) > 2 else ""
+        short = url if len(url) <= 90 else url[:87] + "…"
+        self.st["plast"].setText("%s  %s %s  %s  %s, %.1f s" % (ts, method, code, short, hsize(nout), ms / 1000.0))
+        self.st["plast"].setToolTip(url)
+
     def _on_ping(self, *_):
         out = bytes(self.latproc.readAllStandardOutput()).decode(errors="replace")
         i = out.find("time=")
@@ -352,24 +412,34 @@ class Win(QtWidgets.QMainWindow):
 
     # ---- dialing log: follow the gateway's journal ----
     def _start_journal(self):
-        if getattr(self, "jproc", None):
-            self.jproc.kill(); self.jproc.waitForFinished(500)
-        self.dlog.clear(); self._lastline = None; self._jbuf = b""
         self.sessions = 0; self.last_dial = "–"; self.modem_state = "unknown"
-        self.jproc = QtCore.QProcess(self)
-        self.jproc.readyReadStandardOutput.connect(self._on_journal)
-        self.jproc.readyReadStandardError.connect(lambda: self.dlog.appendPlainText(
-            bytes(self.jproc.readAllStandardError()).decode(errors="replace").strip()
-            + "\n(to see the log, add yourself to the systemd-journal group and log in again)"))
-        self.jproc.start("journalctl", ["-u", GW_UNIT, "-f", "-n", "80", "-o", "short", "--no-hostname"])
+        self.jproc = self._follow(getattr(self, "jproc", None), GW_UNIT, self.dlog, self._track,
+                                  ["-n", "80"], dedupe=True)
+        # proxy: replay the current run so the counters cover it, else the last lines
+        self._preset()
+        since = run(["systemctl", "show", "-p", "ActiveEnterTimestamp", "--value", PX_UNIT]).stdout.strip()
+        extra = ["--since", " ".join(since.split()[1:3])] if self._active(PX_UNIT) and since else ["-n", "200"]
+        self.pproc = self._follow(getattr(self, "pproc", None), PX_UNIT, self.plog, self._ptrack, extra)
 
-    def _on_journal(self):
-        self._jbuf += bytes(self.jproc.readAllStandardOutput())
-        *lines, self._jbuf = self._jbuf.split(b"\n")
-        for raw in lines:
-            ln = raw.decode("utf-8", "replace"); msg = ln.split(": ", 1)[-1]
-            if msg == self._lastline: continue
-            self._lastline = msg; self._track(ln, msg); self.dlog.appendPlainText(ln)
+    def _follow(self, old, unit, view, track, extra, dedupe=False):
+        """Tail a unit's journal into `view`, passing each line to `track`."""
+        if old:
+            old.kill(); old.waitForFinished(500)
+        view.clear()
+        p = QtCore.QProcess(self); st = {"buf": b"", "last": None}
+        def out():
+            st["buf"] += bytes(p.readAllStandardOutput())
+            *lines, st["buf"] = st["buf"].split(b"\n")
+            for raw in lines:
+                ln = raw.decode("utf-8", "replace"); msg = ln.split(": ", 1)[-1]
+                if dedupe and msg == st["last"]: continue
+                st["last"] = msg; track(ln, msg); view.appendPlainText(ln)
+        p.readyReadStandardOutput.connect(out)
+        p.readyReadStandardError.connect(lambda: view.appendPlainText(
+            bytes(p.readAllStandardError()).decode(errors="replace").strip()
+            + "\n(to see the log, add yourself to the systemd-journal group and log in again)"))
+        p.start("journalctl", ["-u", unit, "-f", "-o", "short", "--no-hostname"] + extra)
+        return p
 
     def _track(self, ln, msg):
         ts = " ".join(ln.split()[:3])
@@ -419,7 +489,8 @@ class Win(QtWidgets.QMainWindow):
         self.console.moveCursor(QtGui.QTextCursor.End)
 
     def closeEvent(self, e):
-        self.jproc.kill(); self.jproc.waitForFinished(500)
+        for p in (self.jproc, self.pproc):
+            p.kill(); p.waitForFinished(500)
         if self.connected: self.reqDisc.emit()
         self.thr.quit(); self.thr.wait(1500); e.accept()
 

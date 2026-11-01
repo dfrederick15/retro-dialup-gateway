@@ -13,7 +13,7 @@ Point the old browser's HTTP proxy at  <LOCAL_IP>:<PROXY_PORT>  (default
 
 Settings: PROXY_PORT, PROXY_STRIP_SCRIPTS in /etc/retrogw/retrogw.conf.
 """
-import os, sys, ssl, gzip, zlib, io, re, socket
+import os, sys, ssl, gzip, zlib, io, re, socket, time
 from http.server import BaseHTTPRequestHandler
 from socketserver import ThreadingTCPServer
 import urllib.request, urllib.error
@@ -69,6 +69,18 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *a):
         sys.stderr.write("[proxy] %s - %s\n" % (self.address_string(), fmt % a))
 
+    # One machine-readable line per request (the control panel parses these):
+    #   [proxy] REQ <client> <method> <status> in=<bytes> out=<bytes> ms=<n> <url> [(error)]
+    # in = page size as fetched (decompressed), out = bytes sent to the old PC.
+    def log_request(self, code="-", size="-"): pass
+    def log_error(self, fmt, *a): pass
+
+    def _log(self, method, code, url, nin=0, nout=0, err=None):
+        sys.stderr.write("[proxy] REQ %s %s %s in=%d out=%d ms=%d %s%s\n" % (
+            self.client_address[0], method, code, nin, nout,
+            (time.time() - self._t0) * 1000, url or "-",
+            " (%s)" % err if err else ""))
+
     def _fetch(self, method, url, body=None):
         headers = {"User-Agent": UA, "Accept": "*/*", "Accept-Language": "en"}
         req = urllib.request.Request(url, data=body, method=method, headers=headers)
@@ -82,9 +94,11 @@ class Handler(BaseHTTPRequestHandler):
         return "http://%s%s" % (host, p) if host else None
 
     def _serve(self, method):
+        self._t0 = time.time()
         url = self._target()
         if not url:
-            self.send_error(400, "no absolute URL"); return
+            self.send_error(400, "no absolute URL")
+            self._log(method, 400, self.path, err="no absolute URL"); return
         clen = int(self.headers.get("Content-Length", 0) or 0)
         body = self.rfile.read(clen) if clen else None
         # try as-requested; if plain http is refused, retry https
@@ -100,11 +114,13 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 err = e; continue
         if resp is None:
-            self.send_error(502, "fetch failed: %s" % err); return
+            self.send_error(502, "fetch failed: %s" % err)
+            self._log(method, 502, url, err=err); return
 
         data = resp.read()
         hdrs = {k.lower(): v for k, v in resp.headers.items()}
         data = decompress(data, hdrs.get("content-encoding"))
+        nin = len(data)
         ctype = hdrs.get("content-type", "application/octet-stream")
         if "text/html" in ctype.lower():
             m = re.search(r"charset=([\w-]+)", ctype, re.I)
@@ -120,15 +136,21 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Connection", "close")
         self.end_headers()
-        if method != "HEAD":
-            self.wfile.write(data)
+        try:
+            if method != "HEAD":
+                self.wfile.write(data)
+        except OSError as e:
+            self._log(method, code, url, nin, 0, "client gone: %s" % e); return
+        self._log(method, code, url, nin, 0 if method == "HEAD" else len(data))
 
     def do_GET(self):  self._serve("GET")
     def do_POST(self): self._serve("POST")
     def do_HEAD(self): self._serve("HEAD")
     def do_CONNECT(self):
         # Old browser can't do modern TLS inside a tunnel; tell it to use http://
+        self._t0 = time.time()
         self.send_error(501, "Use http:// URLs; this proxy upgrades to TLS for you")
+        self._log("CONNECT", 501, self.path, err="https not supported; use http://")
 
 class Server(ThreadingTCPServer):
     allow_reuse_address = True
